@@ -1,10 +1,17 @@
-from machine import Pin
-import time
+import utime
+import config
+from hw.line import LineSensors
 
-PIN = 2  
-s = Pin(PIN, Pin.IN)
 
-while True:
-    v = s.value()
-    print(v)  # expect: white=1, black=0 (per handout)
-    time.sleep(0.05)
+def main():
+    #Test reading line sensors and printing blackness values
+    line = LineSensors(config.LINE_PINS, invert=config.LINE_INVERT)
+
+    #Continuously read and print blackness values every 100ms
+    while True:
+        b = line.read_black()
+        print(f"Blackness: {b}")
+        utime.sleep_ms(100)
+
+if __name__ == "__main__":
+    main()
