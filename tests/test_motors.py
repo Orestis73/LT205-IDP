@@ -37,5 +37,5 @@ def test_both_motors():
         motor4.Reverse()
         sleep(1)
 
-if _name_ == "_main_":
+if __name__ == "_main_":
     test_both_motors()
