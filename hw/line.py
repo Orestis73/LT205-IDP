@@ -24,5 +24,15 @@ class LineSensors:
             black = [1 - b for b in black]
         return black
 
+    # Pack blackness into a 4-bit pattern b3..b0 = [L, ML, MR, R]
+    # Example: black=[0,1,1,0] -> bits=0b0110 (=6)
+    def read_bits(self) -> int:
+        b = self.read_black()
+        return (b[0] << 3) | (b[1] << 2) | (b[2] << 1) | (b[3] << 0)
     
+    # Count how many sensors see black
+    def sum_black(self) -> int:
+        b = self.read_black()
+        return b[0] + b[1] + b[2] + b[3]
     
+
