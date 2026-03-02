@@ -50,3 +50,17 @@ JUNC_COOLDOWN_MS = 600
 JUNC_BEHAVIOR = "FORCE_STRAIGHT"
 CROSS_MS = 200               # how long to force straight through junction blob
 CROSS_THROTTLE = 0.18        # forward speed during forced crossing
+
+# --- Test 3 intersection action ---
+INTERSECTION_ACTION = "STRAIGHT"  # "STRAIGHT", "LEFT", "RIGHT"
+CROSS_MS = 200
+CROSS_THROTTLE = 0.18
+
+# Intersection detection
+CENTER_THRESH = 0.35
+JUNC_N = 3
+JUNC_COOLDOWN_MS = 600
+
+# Turning
+TURN_STEER = 0.45
+TURN_TIMEOUT_MS = 1500
