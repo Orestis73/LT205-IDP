@@ -19,13 +19,34 @@ LINE_PINS = [1, 2, 4, 5]
 # Line sensor inversion
 LINE_INVERT = False 
 
-# Control tuning
+# --- Loop ---
 LOOP_HZ = 50
 
-BASE_THROTTLE = 0.25     # start low (0.15–0.35)
-KP = 0.35                # start here, tune up/down
-MAX_STEER = 0.7          # clamp steering so you don’t saturate instantly
+# --- Line follow (PD) ---
+BASE_THROTTLE = 0.20
+KP = 0.25
+KD = 0.03
+MAX_STEER = 0.50
+DEADBAND = 0.25
 
-# Line lost behaviour
-LINE_LOST_N = 3          # how many cycles of "no line" before search
-SEARCH_STEER = 0.35      # turn-in-place strength during search
+# --- Lost line recovery ---
+LINE_LOST_N = 3
+SEARCH_STEER = 0.35
+
+# --- Printing ---
+PRINT_COOLDOWN_MS = 400
+
+# --- Corner detection ---
+CORNER_ERR_THRESH = 0.60     # bigger = only call corners when strongly off-centre
+CORNER_N = 2                 # frames in a row required
+
+# --- Junction detection ---
+CENTER_THRESH = 0.35         # must be near centered to count as junction
+JUNC_N = 3                   # frames in a row required
+JUNC_COOLDOWN_MS = 600
+
+# --- Junction behaviour (for test script 2) ---
+# "FORCE_STRAIGHT" or "FOLLOW"
+JUNC_BEHAVIOR = "FORCE_STRAIGHT"
+CROSS_MS = 200               # how long to force straight through junction blob
+CROSS_THROTTLE = 0.18        # forward speed during forced crossing
