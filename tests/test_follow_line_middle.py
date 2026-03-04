@@ -28,11 +28,11 @@ def middle_error(black, last_err):
     mL = black[1]
     mR = black[2]
 
-    if mL == 1 and mR == 0:
-        return -1.0
     if mL == 0 and mR == 1:
+        return -1.0
+    if mL == 1 and mR == 0:
         return +1.0
-    if mL == 1 and mR == 1:
+    if mL == 0 and mR == 0:
         return 0.0
 
     # mL==0 and mR==0
@@ -85,6 +85,7 @@ def main():
         t_last = t_now
 
         black = sensors.read_black()
+        print(black)
         bits = sensors.read_bits()
 
         err = middle_error(black, last_err)
@@ -99,7 +100,6 @@ def main():
                       "black=", black,
                       "last_err=", last_err)
                 last_print = t_now
-
             if lost_count < lost_n:
                 motors.arcade(0.0, 0.0)
             else:

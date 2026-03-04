@@ -84,7 +84,7 @@ def decide_junction_action(bits, err, last_err):
 
 
 def main():
-    sensors = LineSensors(config.LINE_PINS, invert=getattr(config, "LINE_INVERT", False))
+    sensors = Line(config.LINE_PINS, invert=getattr(config, "LINE_INVERT", False))
 
     left = DCMotor(config.MOTOR_L_DIR, config.MOTOR_L_PWM, pwm_freq_hz=1000,
                    invert=getattr(config, "MOTOR_L_INVERT", False))
