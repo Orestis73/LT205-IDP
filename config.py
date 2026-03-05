@@ -84,3 +84,23 @@ STOP_ON_MISMATCH = False
 
 EVENT_ENTER_N = 3     # debounce for event trigger
 TURN_APPROACH_MS = 220   # only used when the event looks like an intersection
+
+# ---- Missing constants required by mission_runner.py ----
+INTER_LATCH_MS = 350
+
+FINAL_FOLLOW_MS = 1300
+FINAL_FOLLOW_THROTTLE = 0.35
+FINAL_FORWARD_MS = 1300
+FINAL_FORWARD_THROTTLE = 0.35
+
+# If using biased BORDER_PUSH:
+BORDER_BIAS_K = 0.18
+BORDER_BIAS_MAX = 0.35
+
+# If using START seek:
+START_SEEK_AFTER_MS = 800
+START_SEEK_STEER = 0.35
+
+DEBUG=True
+DEBUG_MS = 250
+
