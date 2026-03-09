@@ -42,6 +42,6 @@ class State:
     TURN_APPROACH = 6
     TURN_SPIN = 7
     TURN_ALIGN = 8
-    FINAL_FOLLOW = 9
-    FINAL_FORWARD = 10
-    STOP = 11
+    STOP = 9
+    SPIN180_SPIN = 10
+    SPIN180_ALIGN = 11
