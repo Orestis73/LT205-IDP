@@ -169,3 +169,112 @@ def turning_movement(mem, motors, sensors, states):
             continue
 
     return mem.state == states.STOP
+
+def straight_movement(mem, motors, sensors, states, mission):
+    while mem.state not in (states.FOLLOW, states.FINAL_FOLLOW, states.STOP):
+        t_now = ticks_ms()
+        black, white, sumw, good_line, inter_cond, corner_raw = sensors.sense()
+        err = middle_error_white_line(black)
+
+        if mem.state == states.DO_STRAIGHT:
+            elapsed = ticks_diff(t_now, mem.state_t0)
+
+            steer = 0.0
+            if err is not None:
+                steer = clamp(
+                    config.STRAIGHT_KP * err,
+                    -config.STRAIGHT_MAX_STEER,
+                    +config.STRAIGHT_MAX_STEER
+                )
+
+            motors.arcade(config.STRAIGHT_THROTTLE, steer)
+
+            if (not inter_cond) and (sumw <= 2):
+                mem.straight_out += 1
+            else:
+                mem.straight_out = 0
+
+            if elapsed >= config.STRAIGHT_MIN_MS and mem.straight_out >= config.INTER_EXIT_N and good_line:
+                print("DONE straight. step=", mem.step)
+                mem.step += 1
+                mem.last_event_t = t_now
+                mem.good_rearm = 0
+
+                if mem.finish_mode and mem.step >= len(mission):
+                    set_state(mem, states.FINAL_FOLLOW, "final straight complete -> final follow")
+                else:
+                    set_state(mem, states.FOLLOW, "straight complete")
+                continue
+
+            if elapsed >= config.STRAIGHT_TIMEOUT_MS:
+                mem.last_event_t = t_now
+                mem.good_rearm = 0
+                set_state(mem, states.FOLLOW, "straight timeout -> follow")
+                continue
+
+
+def spin180_movement(mem, motors, sensors, states):
+    """
+    Blocking helper for a 180-degree turn.
+
+    Expected states:
+        states.SPIN180_SPIN
+        states.SPIN180_ALIGN
+
+    Exits when mem.state becomes:
+        states.FOLLOW
+        states.STOP
+    """
+
+    while mem.state not in (states.FOLLOW, states.STOP):
+        t_now = ticks_ms()
+        black, white, sumw, good_line, inter_cond, corner_raw = sensors.sense()
+        err = middle_error_white_line(black)
+
+        # ---------------- SPIN180_SPIN ----------------
+        if mem.state == states.SPIN180_SPIN:
+            elapsed = ticks_diff(t_now, mem.state_t0)
+
+            if elapsed >= config.SPIN180_TIMEOUT_MS:
+                set_state(mem, states.STOP, "SPIN180 TIMEOUT")
+                continue
+
+            motors.arcade(config.SPIN180_THROTTLE, mem.dir_turn * config.SPIN180_STEER)
+
+            if elapsed < config.SPIN180_MIN_MS:
+                continue
+
+            # after minimum spin, switch to align once line is sighted again
+            sighted = (sumw >= 1)
+            if sighted:
+                mem.acquire_ok = 0
+                set_state(mem, states.SPIN180_ALIGN, "180 spin sighted line -> align")
+
+            continue
+
+        # ---------------- SPIN180_ALIGN ----------------
+        if mem.state == states.SPIN180_ALIGN:
+            if ticks_diff(t_now, mem.state_t0) >= config.SPIN180_ALIGN_TIMEOUT_MS:
+                set_state(mem, states.STOP, "SPIN180 ALIGN TIMEOUT")
+                continue
+
+            if err is None:
+                motors.arcade(config.SPIN180_ALIGN_THROTTLE, mem.dir_turn * 0.35)
+            else:
+                motors.arcade(
+                    config.SPIN180_ALIGN_THROTTLE,
+                    clamp(config.SPIN180_ALIGN_KP * err, -config.SPIN180_ALIGN_MAX_STEER, +config.SPIN180_ALIGN_MAX_STEER),
+                )
+
+            if good_line and (not inter_cond) and (sumw <= 2):
+                mem.acquire_ok += 1
+                if mem.acquire_ok >= config.SPIN180_REACQUIRE_N:
+                    mem.last_event_t = t_now
+                    mem.good_rearm = 0
+                    set_state(mem, states.FOLLOW, "180 spin complete")
+            else:
+                mem.acquire_ok = 0
+
+            continue
+
+    return mem.state == states.STOP
