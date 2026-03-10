@@ -154,7 +154,7 @@ def main():
                             mem.step += 1
                            
                         if act is None:
-                            set_state(mem, states.FINAL_FOLLOW, "mission complete -> final follow")
+                            set_state(mem, states.STOP, "mission complete -> stop")
                             continue
 
                         if act == "straight":
@@ -219,6 +219,11 @@ def main():
 
         # ---------------- GRAB ----------------
         if mem.state == states.GRAB:
+            nav.stack_decider()
+            if nav.current_stack in ["pd", "od", "ou"]:
+                mem.dir_turn = -1
+            if nav.current_stack == "pu":
+                mem.dir_turn = +1
             grab_movement(mem, motors, sensors, states)
             continue
 
