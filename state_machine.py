@@ -10,7 +10,7 @@ class navigation:
         self.current_destination = None
         #self.switch_stack = None
         #self.is_picking = False
-        self.stack_reel_count_test = {"pd":[0,0,"red"], "pu":[0,None,"yellow"],"ou":[0,None,""], "od":[0,None,""]}
+        self.stack_reel_count_test = {"pd":[0,3,"red"], "pu":[0,None,"yellow"],"ou":[0,None,"green"], "od":[0,None,"red"]}
         self.stack_reel_count = self.stack_reel_count_test  #[searched stack number, picked reels number]
         #self.orientation = 0
 
@@ -54,14 +54,19 @@ class navigation:
             print(f"picking from {self.current_stack} to {self.current_destination}")
             mission = func()
             self.nav_state = "go main"
-            self.go_to_main_route = True
         if self.nav_state == "go main":
-            mission = self.go_to_main_route()
-            self.nav_state = None
+            if self.reel_count >= 4:
+                mission = self.go_back()
+                self.nav_state = "END"
+            else:
+                mission = self.go_to_main_route()
+                self.nav_state = None
         if not self.nav_state:
             self.stack_reel_count = self.stack_reel_count_test
             print("Go main route") 
             mission = self.main_route()
+        if self.nav_state == "END":
+            mission = ["END"]
         
         return mission
     '''
@@ -177,7 +182,7 @@ class navigation:
     def grab_from_od(self):
         m = []
         m.append('180')
-        for i in range(self.stack_reel_count[self.current_stack][0]-1):
+        for i in range(6 - self.stack_reel_count[self.current_stack][0]+1):
             m.append("straight")
         destinations = {
             "blue":["straight"],
@@ -196,6 +201,16 @@ class navigation:
             "yellow":["right","left"],
             "green":["right","straight", "straight", "left"],
             "blue": ["right","straight", "straight", "straight", "left"]
+        }
+        m = destinations[self.current_destination]
+        return m
+
+    def go_back(self):
+        destinations = {
+            "red":["left", "straight", "left"],
+            "yellow":["left","left"],
+            "green":["right","right"],
+            "blue": ["right","straight", "right"]
         }
         m = destinations[self.current_destination]
         return m
