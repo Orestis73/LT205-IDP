@@ -23,7 +23,7 @@ class navigation:
             "ou":[self.grab_from_ou],#self.go_ou, self.grab_from_ou, self.ou_od],
             "od":[self.grab_from_od]#self.go_od, self.grab_from_od]
         }
-
+    '''
     def stack_decider(self):
         for i in range(len(self.stack_reel_count)):
             stack = list(self.stack_reel_count.keys())[i]
@@ -33,7 +33,14 @@ class navigation:
                 self.previous_stack = self.current_stack
                 self.current_stack = stack
                 break
-            
+    '''
+    def stack_decider(self):
+        for stack, data in self.stack_reel_count.items():
+            # data[0] 对应你存储的 searched stack number
+            if data[0] < 6:
+                self.previous_stack = self.current_stack
+                self.current_stack = stack
+                return # 找到第一个可用的就退出          
     def destination_decider(self):
         '''resistance detecting logic'''
         self.reel_count += 1
