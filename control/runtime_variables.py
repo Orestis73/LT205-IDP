@@ -48,3 +48,7 @@ class State:
     SPIN180_SPIN = 10
     SPIN180_ALIGN = 11
     GRAB = 12
+    GRAB_FORWARD = 13
+    GRAB_WAIT = 14
+    GRAB_REVERSE = 15
+    GRAB_TURN_BACK = 16
