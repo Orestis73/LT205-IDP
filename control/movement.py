@@ -1,13 +1,52 @@
-from utime import ticks_ms, ticks_diff
+from utime import ticks_ms, ticks_diff, sleep_ms
 import config
 from control.ulilities import set_state, clamp
-from control.pd import middle_error_white_line
+from control.pd import middle_error_white_line, pd_follow
 
+period_ms = int(1000 / config.LOOP_HZ)
+dt_s = period_ms / 1000.0
+
+def fixed_rate_tick(t_last, period_ms):
+    """Returns (t_now, new_t_last)."""
+    t_now = ticks_ms()
+    dt = ticks_diff(t_now, t_last)
+    if dt < period_ms:
+        sleep_ms(period_ms - dt)
+        t_now = ticks_ms()
+    return t_now, t_now
+
+def compute_event(t_now, mem, corner_raw, inter_cond):
+
+    # recent good line gate
+    recent_good = ticks_diff(t_now, mem.t_last_good_line) <= config.RECENT_GOOD_LINE_MS
+
+    # corner only counts if we were on the line recently
+    corner_cond = recent_good and corner_raw and (not inter_cond)
+
+    # event condition: either effective intersection or corner
+    event_cond = inter_cond or corner_cond
+
+    return inter_cond, corner_cond, event_cond, recent_good
 
 def border_push_movement(mem, motors, sensors, states):
+
+    t_last = ticks_ms()
+
     while mem.state != states.FOLLOW and mem.state != states.STOP:
-        t_now = ticks_ms()
-        black, white, sumw, good_line = sensors.sense()
+
+        # Timing: enforce fixed loop rate and get current time
+        t_now, t_last = fixed_rate_tick(t_last, period_ms)
+
+        # Sense
+        black, white, sumw, good_line, inter_cond, corner_raw = sensors.sense()
+
+        if good_line:
+            mem.t_last_good_line = t_now
+
+        inter_cond, corner_cond, event_cond, recent_good = compute_event(t_now, mem, corner_raw, inter_cond)
+
+        err = middle_error_white_line(black)
+
 
         # ---------------- START_BOX ----------------
         if mem.state == states.START_BOX:
@@ -102,12 +141,21 @@ def border_push_movement(mem, motors, sensors, states):
             continue
 
 
-def turning_movement(mem, motors, sensors, states):
-    while mem.state not in (states.FOLLOW, states.STOP):
-        t_now = ticks_ms()
-        black, white, sumw, good_line = sensors.sense()
+def turning_movement(mem, motors, sensors, states, advance_step=True):
+    while mem.state not in (states.FOLLOW, states.STOP, states.GRAB):
+       
+        # Timing: enforce fixed loop rate and get current time
+        t_now, t_last = fixed_rate_tick(t_last, period_ms)
 
-        inter_cond = sensors.is_intersection(white)
+        # Sense
+        black, white, sumw, good_line, inter_cond, corner_raw = sensors.sense()
+
+        if good_line:
+            mem.t_last_good_line = t_now
+
+        inter_cond, corner_cond, event_cond, recent_good = compute_event(t_now, mem, corner_raw, inter_cond)
+
+        err = middle_error_white_line(black)
 
         # ---------------- TURN_APPROACH ----------------
         if mem.state == states.TURN_APPROACH:
@@ -147,9 +195,7 @@ def turning_movement(mem, motors, sensors, states):
             if ticks_diff(t_now, mem.state_t0) >= config.ALIGN_TIMEOUT_MS:
                 set_state(mem, states.STOP, "ALIGN TIMEOUT step={}".format(mem.step))
                 continue
-
-            err = middle_error_white_line(black)
-
+            
             if err is None:
                 motors.arcade(config.ALIGN_THROTTLE, mem.dir_turn * 0.35)
             else:
@@ -159,7 +205,8 @@ def turning_movement(mem, motors, sensors, states):
                 mem.acquire_ok += 1
                 if mem.acquire_ok >= config.REACQUIRE_N:
                     print("DONE turn. step=", mem.step, "dir=", ("R" if mem.dir_turn > 0 else "L"))
-                    mem.step += 1
+                    if advance_step:
+                        mem.step += 1
                     mem.last_event_t = t_now
                     mem.good_rearm = 0
                     set_state(mem, states.FOLLOW, "turn complete")
@@ -171,10 +218,21 @@ def turning_movement(mem, motors, sensors, states):
     return mem.state == states.STOP
 
 def straight_movement(mem, motors, sensors, states, mission):
-    while mem.state not in (states.FOLLOW, states.FINAL_FOLLOW, states.STOP):
-        t_now = ticks_ms()
+    while mem.state not in (states.FOLLOW, states.STOP):
+
+        # Timing: enforce fixed loop rate and get current time
+        t_now, t_last = fixed_rate_tick(t_last, period_ms)
+
+        # Sense
         black, white, sumw, good_line, inter_cond, corner_raw = sensors.sense()
+
+        if good_line:
+            mem.t_last_good_line = t_now
+
+        inter_cond, corner_cond, event_cond, recent_good = compute_event(t_now, mem, corner_raw, inter_cond)
+
         err = middle_error_white_line(black)
+
 
         if mem.state == states.DO_STRAIGHT:
             elapsed = ticks_diff(t_now, mem.state_t0)
@@ -199,17 +257,13 @@ def straight_movement(mem, motors, sensors, states, mission):
                 mem.step += 1
                 mem.last_event_t = t_now
                 mem.good_rearm = 0
-
-                if mem.finish_mode and mem.step >= len(mission):
-                    set_state(mem, states.FINAL_FOLLOW, "final straight complete -> final follow")
-                else:
-                    set_state(mem, states.FOLLOW, "straight complete")
+                set_state(mem, states.FOLLOW, "straight complete")
                 continue
 
             if elapsed >= config.STRAIGHT_TIMEOUT_MS:
                 mem.last_event_t = t_now
                 mem.good_rearm = 0
-                set_state(mem, states.FOLLOW, "straight timeout -> follow")
+                set_state(mem, states.STOP, "straight timeout -> stop")
                 continue
 
 
@@ -227,9 +281,20 @@ def spin180_movement(mem, motors, sensors, states):
     """
 
     while mem.state not in (states.FOLLOW, states.STOP):
-        t_now = ticks_ms()
+
+        # Timing: enforce fixed loop rate and get current time
+        t_now, t_last = fixed_rate_tick(t_last, period_ms)
+
+        # Sense
         black, white, sumw, good_line, inter_cond, corner_raw = sensors.sense()
+
+        if good_line:
+            mem.t_last_good_line = t_now
+
+        inter_cond, corner_cond, event_cond, recent_good = compute_event(t_now, mem, corner_raw, inter_cond)
+
         err = middle_error_white_line(black)
+
 
         # ---------------- SPIN180_SPIN ----------------
         if mem.state == states.SPIN180_SPIN:
@@ -277,7 +342,87 @@ def spin180_movement(mem, motors, sensors, states):
 
             continue
 
-    return mem.state == states.STOP
-
 def grab_movement(mem, motors, sensors, states):
-    None
+    
+    while mem.state not in (states.FOLLOW, states.STOP):
+        
+        # Timing: enforce fixed loop rate and get current time
+        t_now, t_last = fixed_rate_tick(t_last, period_ms)
+
+        # Sense
+        black, white, sumw, good_line, inter_cond, corner_raw = sensors.sense()
+
+        if good_line:
+            mem.t_last_good_line = t_now
+
+        inter_cond, corner_cond, event_cond, recent_good = compute_event(t_now, mem, corner_raw, inter_cond)
+
+        err = middle_error_white_line(black)
+
+        # ---------------- GRAB ----------------
+        if mem.state == states.GRAB:
+            set_state(mem, states.TURN_SPIN, "grab -> first turn")
+            turning_movement(mem, motors, sensors, states, advance_step=False)
+
+            if mem.state == states.STOP:
+                continue
+
+            mem.last_err = 0.0 if err is None else err
+            set_state(mem, states.GRAB_FORWARD, "grab turn complete -> forward")
+            continue
+
+        # ---------------- GRAB_FORWARD ----------------
+        if mem.state == states.GRAB_FORWARD:
+            if err is None:
+                motors.arcade(config.GRAB_FORWARD_THROTTLE, 0.0)
+            else:
+                throttle, steer = pd_follow(err, mem.last_err, dt_s)
+                motors.arcade(throttle, steer)
+                mem.last_err = err
+
+            if ticks_diff(t_now, mem.state_t0) >= config.GRAB_FORWARD_MS:
+                set_state(mem, states.GRAB_WAIT, "grab forward done -> wait")
+            continue
+
+        # ---------------- GRAB_WAIT ----------------
+        if mem.state == states.GRAB_WAIT:
+            motors.arcade(0.0, 0.0)
+
+            if ticks_diff(t_now, mem.state_t0) >= config.GRAB_WAIT_MS:
+                mem.acquire_ok = 0
+                mem.last_err = 0.0 if err is None else err
+                set_state(mem, states.GRAB_REVERSE, "grab wait done -> reverse")
+            continue
+
+        # ---------------- GRAB_REVERSE ----------------
+        if mem.state == states.GRAB_REVERSE:
+            if ticks_diff(t_now, mem.state_t0) >= config.GRAB_REVERSE_TIMEOUT_MS:
+                set_state(mem, states.STOP, "GRAB REVERSE TIMEOUT")
+                continue
+
+            if err is None:
+                motors.arcade(config.GRAB_REVERSE_THROTTLE, 0.0)
+            else:
+                throttle, steer = pd_follow(err, mem.last_err, dt_s)
+                motors.arcade(-throttle, -steer) 
+                mem.last_err = err
+
+            if sumw == 4:
+                mem.acquire_ok += 1
+                if mem.acquire_ok >= config.GRAB_REVERSE_ALL_WHITE_N:
+                    set_state(mem, states.GRAB_TURN_BACK, "grab reverse done -> turn back")
+            else:
+                mem.acquire_ok = 0
+
+            continue
+
+        # ---------------- GRAB_TURN_BACK ----------------
+        if mem.state == states.GRAB_TURN_BACK:
+            set_state(mem, states.TURN_APPROACH, "grab -> second turn")
+            turning_movement(mem, motors, sensors, states, advance_step=False)
+
+            if mem.state == states.STOP:
+                continue
+
+            set_state(mem, states.FOLLOW, "grab complete")
+            continue
