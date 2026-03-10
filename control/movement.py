@@ -278,3 +278,6 @@ def spin180_movement(mem, motors, sensors, states):
             continue
 
     return mem.state == states.STOP
+
+def grab_movement(mem, motors, sensors, states):
+    None
