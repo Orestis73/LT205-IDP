@@ -31,6 +31,8 @@ class Mem:
 
         self.dbg_next = ticks_ms()
 
+        self.step = 0
+
 
 class State:
     START_BOX = 0
@@ -45,3 +47,4 @@ class State:
     STOP = 9
     SPIN180_SPIN = 10
     SPIN180_ALIGN = 11
+    GRAB = 12
