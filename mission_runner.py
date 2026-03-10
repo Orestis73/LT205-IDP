@@ -12,8 +12,9 @@ from hw.motors import DCMotor, MotorPair
 from control.ulilities import clamp, b4
 from control.runtime_variables import Mem, State
 from control.ulilities import set_state
-from control.movement import border_push_movement, spin180_movement, turning_movement, straight_movement, spin180_movement
+from control.movement import border_push_movement, spin180_movement, turning_movement, straight_movement, spin180_movement, grab_movement
 from control.pd import middle_error_white_line, pd_follow
+from state_machine import navigation
 
 def fixed_rate_tick(t_last, period_ms):
     """Returns (t_now, new_t_last)."""
@@ -40,6 +41,12 @@ def compute_event(t_now, mem, corner_raw, inter_cond):
 
     return inter_cond, corner_cond, event_cond, recent_good
 
+def get_new_mission(mem,nav):
+    mem.step = 0
+    mission = nav.route_executor()
+    return mission
+
+
 # ---------------- Main runner ----------------
 def main():
     # sensors + motors
@@ -63,10 +70,11 @@ def main():
     dt_s = period_ms / 1000.0
 
     # mission
-    mission = build_mission()
     mem = Mem()
-    states = State
+    nav = navigation()
+    states = State()
     t_last = ticks_ms()
+    mission = get_new_mission(mem, nav)
 
     border_push_movement(mem,motors,sensors,states)
 
@@ -89,7 +97,6 @@ def main():
         if mem.state == states.STOP:
             motors.arcade(0.0, 0.0)
             break
-
         # ---------------- FOLLOW ----------------
         if mem.state == states.FOLLOW:
             if mem.step >= len(mission):
@@ -112,6 +119,7 @@ def main():
                     mem.good_rearm -= 1
 
             can_detect = (mem.events_armed and (ticks_diff(t_now, mem.last_event_t) >= config.EVENT_COOLDOWN_MS)and (mem.good_rearm >= config.EVENT_REARM_N))
+    
 
             if can_detect:
                 if event_cond:
@@ -122,6 +130,29 @@ def main():
                         mem.good_rearm = 0
 
                         act = expected_action(mission, mem.step)
+                        next_act = expected_action(mission, mem.step+1)
+
+                        if nav.scanning:
+                            nav.stack_decider()
+                            nav.stack_reel_count[nav.current_stack][0] += 1
+                        if nav.stack_reel_count[nav.current_stack][1] and nav.scanning:#TO BE REPLACED BY ACTUAL DETECTION LOGIC
+                            if nav.stack_reel_count[nav.current_stack][1] <= nav.stack_reel_count[nav.current_stack][0]:
+                                nav.scanning = False
+                                nav.nav_state = "picking"
+                                nav.destination_decider()
+                                mission = get_new_mission(mem,nav)
+                                set_state(mem, states.GRAB, "Reel found -> Starting full grab sequence")
+                                continue
+
+                        #if act not in ["straight", "left", "right", "180"]:
+
+                        if next_act == "start_scan":
+                            nav.scanning = True
+                            mem.step += 1
+                        if next_act== "end_scan":
+                            nav.scanning = False
+                            mem.step += 1
+                           
                         if act is None:
                             set_state(mem, states.FINAL_FOLLOW, "mission complete -> final follow")
                             continue
@@ -184,6 +215,11 @@ def main():
         # ------------- 180 ---------------
         if mem.state in (states.SPIN180_SPIN, states.SPIN180_ALIGN):
             spin180_movement(mem, motors, sensors, states)
+            continue
+
+        # ---------------- GRAB ----------------
+        if mem.state == states.GRAB:
+            grab_movement(mem, motors, sensors, states)
             continue
 
 
