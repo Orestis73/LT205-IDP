@@ -94,7 +94,45 @@ class navigation:
     #----------------------------mission list generation functions-------------------------------
     def start(self):
         m = ["right", "straight", "left"]
+        #scan pd
+        m.append("start_scan")
+        for i in range(6):
+            m.append("straight")
+        m.append("end_scan")
+        #going to pu
+        m.append("straight")
+        for i in range(4):
+            m.append("left")
+        #scan pu
+        m.append("start_scan")
+        for i in range(6):
+            m.append("straight")
+        m.append("end_scan")
+        #going to ou
+        m.append("180")
+        for i in range(6): 
+            m.append("straight")
+        m.append("right")
+        m.append("straight")
+        m.append("right")
+        #scan ou
+        m.append("start_scan")
+        for i in range(6):
+            m.append("straight")
+        m.append("end_scan")
+        #going to od
+        m.append("180")
+        for i in range(6): 
+            m.append("straight")
+        for i in range(4):
+            m.append("left")
+        #scan od
+        m.append("start_scan")
+        for i in range(6):
+            m.append("straight")
+        m.append("end_scan")
         return m
+    
     def go_to_pick(self):
         None
 
