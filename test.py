@@ -14,7 +14,7 @@ from control.runtime_variables import Mem, State
 from control.ulilities import set_state
 from control.movement import border_push_movement, spin180_movement, turning_movement, straight_movement, spin180_movement, grab_movement
 from control.pd import middle_error_white_line, pd_follow
-from state_machine import navigation
+from state_machine_2 import navigation
 
 def fixed_rate_tick(t_last, period_ms):
     """Returns (t_now, new_t_last)."""
