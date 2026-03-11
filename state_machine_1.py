@@ -59,11 +59,15 @@ class navigation:
         if self.nav_state == "start":
             mission = self.start()
             self.nav_state = None
+            return mission
+
         if self.nav_state == "picking":
             func = self.routes[self.current_stack][0]
             print(f"picking from {self.current_stack} to {self.current_destination}")
             mission = func()
             self.nav_state = "go main"
+            return mission
+
         if self.nav_state == "go main":
             if self.reel_count >= 4:
                 mission = self.go_back()
@@ -71,14 +75,17 @@ class navigation:
             else:
                 mission = self.go_to_main_route()
                 self.nav_state = None
+            return mission
+
         if self.nav_state == None:
             self.stack_reel_count = self.stack_reel_count_test
             print("Go main route") 
             mission = self.main_route()
+            return mission
+
         if self.nav_state == "END":
             mission = ["END"]
-        
-        return mission
+            return mission
     '''
     def run(self):
         while True:
@@ -229,5 +236,6 @@ class navigation:
         return m
 
         
+
 
 
