@@ -29,12 +29,12 @@ START_THROTTLE = 0.55
 START_SEE_WHITE_N = 2
 
 # This MUST be high enough to move even if you see 1111 at the border.
-BORDER_THROTTLE = 0.60
-BORDER_EXIT_N = 3
+BORDER_THROTTLE = 0.55
+BORDER_EXIT_N = 5
 BORDER_TIMEOUT_MS = 5000
 
 # Acquire should also be high enough to move; if motors are weak, raise to 0.22–0.28.
-ACQUIRE_THROTTLE = 0.28
+ACQUIRE_THROTTLE = 0.37
 ACQUIRE_STEER = 0.55
 ACQUIRE_GOOD_N = 3
 ACQUIRE_TIMEOUT_MS = 5000
