@@ -61,7 +61,7 @@ class LineSensors:
         black = self.read_black()
         white = [1 - b for b in black]
         sumw = white[0] + white[1] + white[2] + white[3]
-        good_line = (black[0] == 0 and black[1] == 1 and black[2] == 1 and black[3] == 0)
+        good_line = (white[0] == 0 and white[1] == 1 and white[2] == 1 and white[3] == 0)
         inter_cond = self.is_intersection(white)
         corner_raw = self.is_corner_raw(white, sumw)
         return black, white, sumw, good_line, inter_cond, corner_raw
