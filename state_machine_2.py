@@ -36,6 +36,10 @@ class navigation:
         self.current_stack_turn = None
         self.current_place_turn = None
 
+        # REAL pose to resume from after local grab/place macros
+        self.rejoin_node = None
+        self.rejoin_heading = None
+
         self.graph = {
             1: [2, 39],
             2: [1, 3],
@@ -191,12 +195,18 @@ class navigation:
             nxt = node_path[i + 1]
             next_heading = self._heading_between(node, nxt)
             action = _turn_action(current_heading, next_heading)
+            action = _turn_action(current_heading, next_heading)
+
             step = {
                 "move": action,
                 "node": node,
                 "heading_in": current_heading,
                 "heading_out": next_heading,
             }
+
+            if action == "180":
+                step["spin_dir"] = self._default_180_dir(node, current_heading, next_heading)
+
             if scan_enabled and node in self.scan_points:
                 step["scan"] = self.scan_points[node]
             mission.append(step)
@@ -216,10 +226,15 @@ class navigation:
         )
         return self.current_mission
 
-    def register_reel_found(self, stack_name, slot_index, turn_dir):
+    def register_reel_found(self, stack_name, slot_index, turn_dir, rejoin_node, rejoin_heading):
         self.active_stack = stack_name
         self.current_stack_turn = turn_dir
         self.stack_info[stack_name]["found_slot"] = slot_index
+
+        # Exact pose after the local grab macro returns to the main route
+        self.rejoin_node = rejoin_node
+        self.rejoin_heading = rejoin_heading
+
         self.mode = "pick"
 
     def _scan_node_for(self, stack_name, slot_index):
@@ -227,13 +242,6 @@ class navigation:
             if info["stack"] == stack_name and info["slot"] == slot_index:
                 return node
         raise ValueError("Unknown stack/slot: {} {}".format(stack_name, slot_index))
-
-    def _stack_heading(self, stack_name):
-        if stack_name in ("od", "ou", "pu"):
-            return HEAD_N
-        if stack_name == "pd":
-            return HEAD_S
-        raise ValueError("Unknown stack {}".format(stack_name))
 
     def _entry_heading_for_colour(self, colour_name):
         info = self.drop_entry[colour_name]
@@ -244,14 +252,13 @@ class navigation:
             raise ValueError("No active stack to deliver from")
         if colour_name not in self.drop_entry:
             raise ValueError("Invalid destination colour: {}".format(colour_name))
+        if self.rejoin_node is None or self.rejoin_heading is None:
+            raise ValueError("Rejoin pose not set")
 
         self.stack_info[self.active_stack]["colour"] = colour_name
-        slot = self.stack_info[self.active_stack]["found_slot"]
-        if slot is None:
-            raise ValueError("Active stack has no found slot")
 
-        current_node = self._scan_node_for(self.active_stack, slot)
-        current_heading = self._stack_heading(self.active_stack)
+        current_node = self.rejoin_node
+        current_heading = self.rejoin_heading
 
         approach_prev = self.drop_entry[colour_name]["approach_prev"]
         entry = self.drop_entry[colour_name]["entry"]
@@ -291,6 +298,8 @@ class navigation:
         self.return_entry_node = None
         self.current_stack_turn = None
         self.current_place_turn = None
+        self.rejoin_node = None
+        self.rejoin_heading = None
         self.mode = "scan"
 
     def step_count(self, mission):
@@ -300,3 +309,24 @@ class navigation:
         if step_index < 0 or step_index >= len(mission["steps"]):
             return None
         return mission["steps"][step_index]
+    
+    def _default_180_dir(self, node, heading_in, heading_out):
+        """
+        Choose the physical spin direction for 180-degree turns.
+
+        Return:
+            -1 -> spin left
+            +1 -> spin right
+        """
+
+        # Special cases you explicitly asked for:
+        # top U-turn at PU should be rightward
+        if node == 29:
+            return +1
+
+        # top U-turn at OU should be leftward
+        if node == 21:
+            return -1
+
+        # sensible default for everything else
+        return +1

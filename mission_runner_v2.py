@@ -64,7 +64,9 @@ def _maybe_wait_for_start(task_sensors, motors):
         sleep_ms(20)
 
 
-def _dispatch_action(mem, states, act, inter_cond):
+def _dispatch_action(mem, states, step, inter_cond):
+    act = step["move"]    
+    
     if act == "straight":
         mem.straight_out = 0
         set_state(mem, states.DO_STRAIGHT, "event->straight")
@@ -87,7 +89,7 @@ def _dispatch_action(mem, states, act, inter_cond):
         return True
 
     if act == "180":
-        mem.dir_turn = +1
+        mem.dir_turn = step.get("spin_dir", +1)
         set_state(mem, states.SPIN180_SPIN, "event->180")
         return True
 
@@ -236,14 +238,20 @@ def main():
                         )
                         dbg("SCAN CHECK", scan, "has_reel=", has_reel)
                         if has_reel:
-                            nav.register_reel_found(scan["stack"], scan["slot"], scan["turn"])
+                            nav.register_reel_found(scan["stack"], scan["slot"], scan["turn"], step["node"], step["heading_out"])
                             mem.dir_turn = scan["turn"]
                             set_state(mem, states.GRAB, "reel detected -> grab")
                             continue
 
                     act = step["move"]
-                    dbg("ACTION", act, "node=", step["node"], "step=", mem.step)
-                    if not _dispatch_action(mem, states, act, inter_cond):
+                    dbg(
+                        "ACTION",
+                        act,
+                        "node=", step["node"],
+                        "step=", mem.step,
+                        "spin_dir=", step.get("spin_dir", None),
+                    )
+                    if not _dispatch_action(mem, states, step, inter_cond):
                         set_state(mem, states.STOP, "bad action {}".format(act))
                         continue
 
