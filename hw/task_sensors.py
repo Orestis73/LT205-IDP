@@ -177,25 +177,25 @@ class TaskSensors:
         # Start device
         vl53l0.start()
         # Read ten samples
-        '''
+        
         distance_sum = 0
         # Read ten samples
-        for _ in range(3):
+        for _ in range(2):
             distance= vl53l0.read()
             print(f"Distance = {distance}mm")  # Check calibration!
             distance_sum += distance
-            sleep(0.3)
-        '''
-        # Stop device
-        distance= vl53l0.read()
+            sleep(0.04)
+        
+        #Stop device
+        #distance= vl53l0.read()
         print(f"Distance = {distance}mm") 
         vl53l0.stop()
-        threshold = 40
-        if distance >= threshold:
+        threshold = 5000
+        if distance_sum >= threshold:
             return False
         else: return True
-        expected = self.test_reel_slot.get(stack_name)
-        return expected is not None and expected == slot_index
+        #expected = self.test_reel_slot.get(stack_name)
+        #return expected is not None and expected == slot_index
 
     # ---------------- pickup ----------------
     def pickup_target_reached(self, stack_name):
