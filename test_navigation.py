@@ -1,41 +1,77 @@
-import random
-from pprint import pprint
-
-from state_machine_2 import navigation
+from state_machine_3 import navigation, heading_name
 
 
-def short_step(step):
-    if step is None:
-        return None
+def describe_step(step, next_node=None):
+    node = step["node"]
+    move = step["move"]
+    hin = heading_name(step["heading_in"])
+    hout = heading_name(step["heading_out"])
 
-    out = {
-        "node": step["node"],
-        "move": step["move"],
-    }
+    if next_node is None:
+        base = f"At node {node}, arrive facing {hin}, take action '{move}', leave facing {hout}."
+    else:
+        base = (
+            f"At node {node}, arrive facing {hin}, take action '{move}', "
+            f"leave facing {hout}, and go to {next_node}."
+        )
 
     if "spin_dir" in step:
-        out["spin_dir"] = step["spin_dir"]
+        spin = "rightward" if step["spin_dir"] > 0 else "leftward"
+        base += f" 180 spin direction: {spin}."
 
     if "scan" in step:
-        out["scan"] = step["scan"]
+        scan = step["scan"]
+        turn_word = "right" if scan["turn"] > 0 else "left"
+        base += (
+            f" Scan point: stack={scan['stack']}, slot={scan['slot']}, "
+            f"sensor side={scan['side']}, branch turn={turn_word}."
+        )
 
-    return out
-
-
-def print_mission_summary(name, mission, max_steps=12):
-    print("\n" + "=" * 70)
-    print(name)
-    print("end_node   =", mission["end_node"])
-    print("end_heading=", mission["end_heading"])
-    print("num_steps  =", len(mission["steps"]))
-    print("first steps:")
-    for i, step in enumerate(mission["steps"][:max_steps]):
-        print("  {:02d}: {}".format(i, short_step(step)))
-    if len(mission["steps"]) > max_steps:
-        print("  ...")
+    return base
 
 
-def find_scan_step_for_slot(nav, mission, stack_name, slot_index):
+def print_scan_summary(nav):
+    mission = nav.build_scan_loop_mission()
+    scans = [step for step in mission["steps"] if "scan" in step]
+
+    print("=" * 90)
+    print("SCAN LOOP SUMMARY")
+    print("=" * 90)
+    print(f"Total real scan points: {len(scans)}")
+    print("Expected: 24 total = 6 per real stack (pd, pu, ou, od)")
+    print()
+
+    counts = {"pd": 0, "pu": 0, "ou": 0, "od": 0}
+    for step in scans:
+        counts[step["scan"]["stack"]] += 1
+
+    print("Counts by stack:")
+    for k in ("pd", "pu", "ou", "od"):
+        print(f"  {k}: {counts[k]}")
+    print()
+
+    print("Real scan points in traversal order:")
+    for i, step in enumerate(scans):
+        print(f"  {i:02d}. {describe_step(step)}")
+    print()
+
+    print("Geometry spot-checks:")
+    pu3 = next(s for s in scans if s["scan"]["stack"] == "pu" and s["scan"]["slot"] == 3)
+    ou3 = next(s for s in scans if s["scan"]["stack"] == "ou" and s["scan"]["slot"] == 3)
+    print(" ", describe_step(pu3))
+    print(" ", describe_step(ou3))
+    print()
+
+    assert len(scans) == 24
+    assert counts == {"pd": 6, "pu": 6, "ou": 6, "od": 6}
+    assert pu3["scan"]["turn"] == +1 and pu3["scan"]["side"] == "right"
+    assert ou3["scan"]["turn"] == -1 and ou3["scan"]["side"] == "left"
+
+    print("Scan geometry checks passed.")
+    print()
+
+
+def find_scan_step(mission, stack_name, slot_index):
     for i, step in enumerate(mission["steps"]):
         scan = step.get("scan")
         if scan and scan["stack"] == stack_name and scan["slot"] == slot_index:
@@ -43,134 +79,129 @@ def find_scan_step_for_slot(nav, mission, stack_name, slot_index):
     return None, None
 
 
-def print_full_step(label, step):
-    print("\n" + label)
-    pprint(step)
+def print_delivery_mission(mission):
+    print(f"Delivery mission has {len(mission['steps'])} planner steps.")
+    print(f"It ends at node {mission['end_node']} facing {heading_name(mission['end_heading'])}.")
+    print()
+
+    steps = mission["steps"]
+    for i, step in enumerate(steps):
+        next_node = steps[i + 1]["node"] if i + 1 < len(steps) else mission["end_node"]
+        print(f"  {i:02d}. {describe_step(step, next_node=next_node)}")
+    print()
 
 
-def simulate_one_cycle(nav, stack_name, slot_index, colour):
-    print("\n" + "#" * 70)
-    print("SIMULATING STACK:", stack_name, "| slot:", slot_index, "| colour:", colour)
+def print_return_mission(mission):
+    print(f"Return-home mission has {len(mission['steps'])} planner steps.")
+    print(f"It ends at node {mission['end_node']} facing {heading_name(mission['end_heading'])}.")
+    print()
 
-    # 1) Build scan mission
+    steps = mission["steps"]
+    for i, step in enumerate(steps):
+        next_node = steps[i + 1]["node"] if i + 1 < len(steps) else mission["end_node"]
+        print(f"  {i:02d}. {describe_step(step, next_node=next_node)}")
+    print()
+
+
+def simulate_cycle(nav, stack_name, slot_index, colour):
+    print("#" * 90)
+    print(f"SIMULATED CASE: stack={stack_name}, slot={slot_index}, identified colour={colour}")
+    print("#" * 90)
+    print()
+
     scan_mission = nav.build_scan_loop_mission()
-    print_mission_summary("SCAN MISSION", scan_mission)
+    idx, scan_step = find_scan_step(scan_mission, stack_name, slot_index)
+    if scan_step is None:
+        raise RuntimeError(f"Could not find scan step for {stack_name} slot {slot_index}")
 
-    # 2) Find the scan step for this reel slot
-    idx, step = find_scan_step_for_slot(nav, scan_mission, stack_name, slot_index)
-    if step is None:
-        raise RuntimeError(
-            "Could not find scan step for {} slot {}".format(stack_name, slot_index)
-        )
+    print("1) SCAN DETECTION")
+    print(f"   During the perimeter scan, this reel would be detected at scan step index {idx}.")
+    print(f"   {describe_step(scan_step)}")
+    print()
 
-    print("\nFound reel scan point:")
-    print("  scan_step_index =", idx)
-    pprint(short_step(step))
-    print_full_step("FULL STEP DATA:", step)
-
-    # 3) Simulate reel detection at that scan point
+    print("2) POST-GRAB POSE")
     nav.register_reel_found(
         stack_name,
         slot_index,
-        step["scan"]["turn"],
-        step["node"],
-        step["heading_out"],
+        scan_step["scan"]["turn"],
+        scan_step["node"],
+        scan_step["heading_out"],
     )
+    print(
+        f"   After the local grab macro finishes, the planner assumes the robot is back at "
+        f"node {nav.rejoin_node}, facing {heading_name(nav.rejoin_heading)}."
+    )
+    print(
+        "   This is the key post-grab pose used to start the delivery mission."
+    )
+    print()
 
-    print("\nAfter register_reel_found:")
-    print("  mode               =", nav.mode)
-    print("  active_stack       =", nav.active_stack)
-    print("  current_stack_turn =", nav.current_stack_turn)
-    print("  found_slot         =", nav.stack_info[stack_name]["found_slot"])
-    print("  rejoin_node        =", nav.rejoin_node)
-    print("  rejoin_heading     =", nav.rejoin_heading)
-
-    # 4) Simulate successful grab + colour identification
+    print("3) DELIVERY TO BAY-APPROACH POINT")
     delivery_mission = nav.build_delivery_mission(colour)
-    print_mission_summary("DELIVERY MISSION", delivery_mission)
+    target_approach = nav.delivery_targets[colour]["approach"]
+    print(
+        f"   Because the reel colour is {colour}, the global planner must route to "
+        f"approach node {target_approach}."
+    )
+    print_delivery_mission(delivery_mission)
 
-    print("\nAfter build_delivery_mission:")
-    print("  mode               =", nav.mode)
-    print("  active_stack       =", nav.active_stack)
-    print("  stored colour      =", nav.stack_info[stack_name]["colour"])
-    print("  current_place_turn =", nav.current_place_turn)
-    print("  return_entry_node  =", nav.return_entry_node)
+    print("4) BAY HANDOVER")
+    print(
+        f"   Global navigation stops at {nav.place_approach_node}."
+    )
+    print(
+        "   Only at that point does the local place/drop-off macro take over."
+    )
+    print()
 
-    # 5) Simulate successful placement
+    print("5) POST-PLACE POSE")
+    nav.set_post_place_pose_from_current_colour()
+    print(
+        f"   After local place logic finishes, the planner assumes the robot is back at "
+        f"{nav.post_place_node}, facing {heading_name(nav.post_place_heading)}."
+    )
+    print()
+
+    print("6) RETURN-HOME MISSION")
     return_mission = nav.build_return_home_mission()
-    print_mission_summary("RETURN-HOME MISSION", return_mission)
+    print(
+        "   Starting from the post-place pose above, the planner computes the route back home."
+    )
+    print_return_mission(return_mission)
 
-    print("\nAfter build_return_home_mission:")
-    print("  mode =", nav.mode)
-
-    # 6) Simulate arriving back home and completing the cycle
+    print("7) CYCLE CLEANUP")
     nav.complete_delivery_cycle()
-
-    print("\nAfter complete_delivery_cycle:")
-    print("  mode         =", nav.mode)
-    print("  active_stack =", nav.active_stack)
-    print("  resolved     =", nav.stack_info[stack_name]["resolved"])
-
-
-def print_all_scan_points(nav):
-    mission = nav.build_scan_loop_mission()
-    print("\n" + "=" * 70)
-    print("ALL SCAN POINTS IN ORDER")
-    for i, step in enumerate(mission["steps"]):
-        if "scan" in step:
-            print(
-                "{:02d}: node={} move={} heading_in={} heading_out={} scan={}".format(
-                    i,
-                    step["node"],
-                    step["move"],
-                    step["heading_in"],
-                    step["heading_out"],
-                    step["scan"],
-                )
-            )
+    print(
+        f"   Stack {stack_name} is now marked resolved = {nav.stack_info[stack_name]['resolved']}."
+    )
+    print(
+        f"   Planner mode reset to '{nav.mode}', active_stack reset to {nav.active_stack}."
+    )
+    print()
+    print()
 
 
 def main():
-    random.seed(42)
-
     nav = navigation()
 
-    # One reel at slot 3 on each stack
-    reel_slots = {
-        "od": 3,
-        "ou": 3,
-        "pu": 3,
-        "pd": 3,
-    }
+    print_scan_summary(nav)
 
-    # Randomly assign one colour to each stack
-    colours = ["blue", "green", "yellow", "red"]
-    random.shuffle(colours)
+    simulate_cycle(nav, "pd", 3, "yellow")
+    simulate_cycle(nav, "pu", 3, "green")
+    simulate_cycle(nav, "ou", 3, "red")
+    simulate_cycle(nav, "od", 3, "blue")
 
-    assigned = {
-        "od": colours[0],
-        "ou": colours[1],
-        "pu": colours[2],
-        "pd": colours[3],
-    }
-
-    print("=" * 70)
-    print("INITIAL STACK INFO")
-    pprint(nav.stack_info)
-
-    print("\nAssigned random colours:")
-    pprint(assigned)
-
-    print_all_scan_points(nav)
-
-    for stack_name in ["od", "ou", "pu", "pd"]:
-        simulate_one_cycle(nav, stack_name, reel_slots[stack_name], assigned[stack_name])
-
-    print("\n" + "=" * 70)
-    print("FINAL STACK INFO")
-    pprint(nav.stack_info)
-
-    print("\nAll resolved =", nav.all_resolved())
+    print("=" * 90)
+    print("FINAL STACK STATUS")
+    print("=" * 90)
+    for stack_name in nav.scan_order:
+        info = nav.stack_info[stack_name]
+        print(
+            f"{stack_name}: found_slot={info['found_slot']}, colour={info['colour']}, "
+            f"resolved={info['resolved']}"
+        )
+    print()
+    print(f"All resolved = {nav.all_resolved()}")
 
 
 if __name__ == "__main__":
