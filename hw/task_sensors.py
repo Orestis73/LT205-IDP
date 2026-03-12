@@ -153,6 +153,47 @@ class TaskSensors:
             This should be a clean yes/no decision.
             Do not return the measured distance itself.
         """
+        from machine import Pin, I2C
+        from libs.VL53L0X.VL53L0X import VL53L0X
+        from utime import sleep
+
+        # config I2C Bus
+        if side == "left":
+            i2c_bus = I2C(id=0, sda=Pin(8), scl=Pin(9))
+        elif side == "right":
+            i2c_bus = I2C(id=0, sda=Pin(8), scl=Pin(9)) 
+        else: return False# I2C0 on GP8 & GP9
+        # print(i2c_bus.scan())  # Get the address (nb 41=0x29, 82=0x52)
+        
+        # Setup vl53l0 object
+        vl53l0 = VL53L0X(i2c_bus)
+        vl53l0.set_Vcsel_pulse_period(vl53l0.vcsel_period_type[0], 18)
+        vl53l0.set_Vcsel_pulse_period(vl53l0.vcsel_period_type[1], 14)
+
+
+        
+        print("Starting vl53l0...")
+
+        # Start device
+        vl53l0.start()
+        # Read ten samples
+        '''
+        distance_sum = 0
+        # Read ten samples
+        for _ in range(3):
+            distance= vl53l0.read()
+            print(f"Distance = {distance}mm")  # Check calibration!
+            distance_sum += distance
+            sleep(0.3)
+        '''
+        # Stop device
+        distance= vl53l0.read()
+        print(f"Distance = {distance}mm") 
+        vl53l0.stop()
+        threshold = 40
+        if distance >= threshold:
+            return False
+        else: return True
         expected = self.test_reel_slot.get(stack_name)
         return expected is not None and expected == slot_index
 
