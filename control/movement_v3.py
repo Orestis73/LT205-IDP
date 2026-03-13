@@ -1,3 +1,4 @@
+from hw import motors
 from utime import ticks_ms, ticks_diff, sleep_ms
 
 import config
@@ -211,7 +212,7 @@ def turning_movement(mem, motors, sensors, states, advance_step=True):
                 set_state(mem, states.STOP, "TURN TIMEOUT step={}".format(mem.step))
                 continue
 
-            motors.arcade(config.TURN_THROTTLE, mem.dir_turn * config.TURN_STEER)
+            motors.arcade(0.0, mem.dir_turn * config.TURN_STEER)
 
             if elapsed < config.TURN_MIN_MS:
                 continue
@@ -233,9 +234,9 @@ def turning_movement(mem, motors, sensors, states, advance_step=True):
                 continue
 
             if err is None:
-                motors.arcade(config.ALIGN_THROTTLE, mem.dir_turn * 0.35)
+                motors.arcade(config.ALIGN_THROTTLE, mem.dir_turn * 0.55)
             else:
-                motors.arcade(config.ALIGN_THROTTLE, clamp(0.20 * err, -0.35, +0.35))
+                motors.arcade(config.ALIGN_THROTTLE, clamp(0.40 * err, -0.6, +0.6))
 
             if good_line and (not inter_cond) and (sumw <= 2):
                 mem.acquire_ok += 1
@@ -320,7 +321,7 @@ def spin180_movement(mem, motors, sensors, states, advance_step=True):
                 set_state(mem, states.STOP, "SPIN180 TIMEOUT")
                 continue
 
-            motors.arcade(config.SPIN180_THROTTLE, mem.dir_turn * config.SPIN180_STEER)
+            motors.arcade(0.0, mem.dir_turn * config.SPIN180_STEER)
 
             if elapsed < config.SPIN180_MIN_MS:
                 continue
@@ -522,19 +523,19 @@ def grab_movement(mem, motors, sensors, states, task_sensors, stack_name):
 def place_movement(mem, motors, sensors, states, task_sensors, colour_name, place_cfg):
     """
     Local place macro:
-        enter bay from A/B/C/D
-        move forward under task-sensor control
-        release reel
-        fixed-time reverse back to A/B/C/D
-        perform explicit local exit action
-        stop there and return to FOLLOW
+
+        Robot is already at bay approach node A/B/C/D.
+        So placement is only:
+            stop
+            open gripper
+            wait briefly
+            return to FOLLOW
+
+    The normal planner will then continue from A/B/C/D and naturally command
+    the required 180 turn to leave the dead-end.
     """
     t_last = ticks_ms()
     did_open = False
-
-    enter_action = place_cfg.get("enter_action", "straight")
-    exit_action = place_cfg.get("exit_action", "none")
-    exit_spin_dir = place_cfg.get("exit_spin_dir", +1)
 
     while mem.state not in (states.FOLLOW, states.STOP):
         t_now, t_last = fixed_rate_tick(t_last, period_ms)
@@ -549,67 +550,20 @@ def place_movement(mem, motors, sensors, states, task_sensors, colour_name, plac
         err = middle_error_white_line(black)
 
         if mem.state == states.PLACE:
-            ok = _do_local_enter_action(mem, motors, sensors, states, enter_action)
-            if not ok:
-                continue
-
-            if mem.state == states.STOP:
-                continue
-
-            mem.last_err = 0.0 if err is None else err
-            if mem.state != states.PLACE_FORWARD:
-                set_state(mem, states.PLACE_FORWARD, "place entry complete -> forward")
-            continue
-
-        if mem.state == states.PLACE_FORWARD:
-            elapsed = ticks_diff(t_now, mem.state_t0)
-
-            if err is None:
-                motors.arcade(PLACE_FORWARD_THROTTLE, 0.0)
-            else:
-                throttle, steer = pd_follow(err, mem.last_err, dt_s)
-                motors.arcade(throttle, steer)
-                mem.last_err = err
-
-            if task_sensors.drop_target_reached(colour_name) or elapsed >= PLACE_FORWARD_TIMEOUT_MS:
-                set_state(mem, states.PLACE_WAIT, "place forward done -> wait")
-            continue
-
-        if mem.state == states.PLACE_WAIT:
-            elapsed = ticks_diff(t_now, mem.state_t0)
             motors.arcade(0.0, 0.0)
 
             if not did_open:
                 task_sensors.open_gripper()
                 did_open = True
+                mem.state_t0 = t_now
 
-            if elapsed >= PLACE_WAIT_MS:
+            if ticks_diff(t_now, mem.state_t0) >= PLACE_WAIT_MS:
                 if not task_sensors.reel_released():
                     set_state(mem, states.STOP, "place failed: reel not released")
                     continue
 
-                set_state(mem, states.PLACE_REVERSE, "place wait done -> fixed reverse out")
-            continue
-
-        if mem.state == states.PLACE_REVERSE:
-            elapsed = ticks_diff(t_now, mem.state_t0)
-            motors.arcade(-PLACE_REVERSE_THROTTLE_MAG, 0.0)
-
-            if elapsed >= PLACE_REVERSE_MS:
-                ok = _do_local_exit_action(
-                    mem,
-                    motors,
-                    sensors,
-                    states,
-                    exit_action,
-                    exit_spin_dir,
-                )
-                if not ok:
-                    continue
-
+                mem.last_err = 0.0 if err is None else err
                 mem.last_event_t = t_now
                 mem.good_rearm = 0
-
-                if mem.state != states.FOLLOW:
-                    set_state(mem, states.FOLLOW, "place complete, back at bay approach node")
-                continue
+                set_state(mem, states.FOLLOW, "place complete at bay node")
+            continue

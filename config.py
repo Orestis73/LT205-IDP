@@ -10,7 +10,7 @@ MOTOR_R_INVERT = True
 MOTOR_PWM_FREQ_HZ = 1000
 
 # ---- Line sensors (LEFT -> RIGHT) ----
-LINE_PINS = [0, 1, 2, 3]
+LINE_PINS = [12, 1, 2, 3]
 LINE_INVERT = False  # keep unless your black/white polarity is wrong
 
 # ---- Loop ----
@@ -70,7 +70,7 @@ TURN_STEER = 0.85
 TURN_MIN_MS = 250
 TURN_TIMEOUT_MS = 3500
 
-ALIGN_THROTTLE = 0.22
+ALIGN_THROTTLE = 0.20
 ALIGN_TIMEOUT_MS = 2500
 REACQUIRE_N = 6
 

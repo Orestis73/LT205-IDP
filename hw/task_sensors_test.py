@@ -1,52 +1,4 @@
-from machine import Pin, PWM
-from utime import sleep
-
-
-class grabber:
-    """
-    Simple helper for the 2-servo grabber.
-
-    servo1:
-        claw open / close
-
-    servo2:
-        lift motion
-    """
-
-    def __init__(self, pin1, pin2):
-        self.servo_pin1 = pin1
-        self.servo_pin2 = pin2
-        self.pwm_pin1 = PWM(Pin(self.servo_pin1), 100)
-        self.pwm_pin2 = PWM(Pin(self.servo_pin2), 100)
-        self.servo1_deg = 0
-        self.servo2_deg = 0
-
-    def write_servo1(self, deg):
-        u16_level1 = int(9500 + deg * 48.5)
-        self.pwm_pin1.duty_u16(u16_level1)
-        self.servo1_deg = deg
-
-    def write_servo2(self, deg):
-        u16_level2 = int(9800 + deg * 48.5)
-        self.pwm_pin2.duty_u16(u16_level2)
-        self.servo2_deg = deg
-
-    def reset(self):
-        self.write_servo1(0)
-        self.write_servo2(0)
-
-    def grab(self, lift=True):
-        self.write_servo1(12)
-        if lift:
-            self.write_servo2(self.servo2_deg - 5)
-
-    def opn(self, lift=True):
-        if lift:
-            self.write_servo2(-5)
-        self.write_servo1(-10)
-
-    def lift(self, deg):
-        self.write_servo2(-deg)
+from machine import Pin
 
 
 class TaskSensors:
@@ -78,23 +30,34 @@ class TaskSensors:
         #
         # Meaning:
         #   For each stack name ("od", "ou", "pu", "pd"),
-        #   store which slot actually contains a reel.
+        #   store which slot indices actually contain reels.
         #
         # Example:
-        #   self.test_reel_slot["od"] = 3
+        #   self.test_reel_slots["od"] = {3}
         # means:
         #   when the robot scans orange-down stack, slot 3 should appear occupied.
         #
+        # Another example:
+        #   self.test_reel_slots["ou"] = {2, 6}
+        # means:
+        #   stack "ou" contains reels at slots 2 and 6.
+        #
         # Valid values:
-        #   None   -> no reel in that stack
-        #   int    -> 1-based slot index of the reel in that stack
+        #   empty set      -> no reels in that stack
+        #   set of ints    -> occupied 1-based slot indices in that stack
         #
         # This is used only by branch_has_reel().
-        self.test_reel_slot = {
-            "od": None,
-            "ou": None,
-            "pu": None,
-            "pd": None,
+        #
+        # Current branch-routing test case:
+        #   node 5   -> pd slot 2
+        #   node 16  -> pu slot 2
+        #   node 24  -> ou slot 2
+        #   node 28  -> ou slot 6
+        self.test_reel_slots = {
+            "od": set(),
+            "ou": {2, 6},
+            "pu": {2},
+            "pd": {2},
         }
 
         # Meaning:
@@ -108,28 +71,17 @@ class TaskSensors:
         #
         # This is only used as fallback in identify_picked_reel()
         # if real resistance measurement is not implemented yet.
+        #
+        # IMPORTANT:
+        #   This fallback is per-stack, not per-slot.
+        #   That is fine for branch-routing tests where the main goal is to
+        #   verify that the robot turns into the correct branches.
         self.test_reel_colour = {
             "od": None,
-            "ou": None,
-            "pu": None,
-            "pd": None,
+            "ou": "yellow",
+            "pu": "green",
+            "pd": "blue",
         }
-
-        # ------------------------------------------------------------------
-        # SERVO GRABBER SETUP
-        # ------------------------------------------------------------------
-        # This uses the existing working servo behaviour:
-        #   servo1 on pin 15
-        #   servo2 on pin 13
-        #
-        # Startup sequence:
-        #   1. reset both servos
-        #   2. wait briefly
-        #   3. open claw without extra lift motion
-        self.grabber = grabber(15, 13)
-        self.grabber.reset()
-        sleep(0.2)
-        self.grabber.opn(False)
 
         # ------------------------------------------------------------------
         # BUTTON INPUT SETUP
@@ -242,51 +194,8 @@ class TaskSensors:
             This should be a clean yes/no decision.
             Do not return the measured distance itself.
         """
-        from machine import Pin, I2C
-        from libs.VL53L0X.VL53L0X import VL53L0X
-        from utime import sleep
-
-        # config I2C Bus
-        if side == "left":
-            i2c_bus = I2C(id=0, sda=Pin(8), scl=Pin(9))
-        elif side == "right":
-            i2c_bus = I2C(id=0, sda=Pin(8), scl=Pin(9))
-        else:
-            return False  # I2C0 on GP8 & GP9
-
-        # print(i2c_bus.scan())  # Get the address (nb 41=0x29, 82=0x52)
-
-        # Setup vl53l0 object
-        vl53l0 = VL53L0X(i2c_bus)
-        vl53l0.set_Vcsel_pulse_period(vl53l0.vcsel_period_type[0], 18)
-        vl53l0.set_Vcsel_pulse_period(vl53l0.vcsel_period_type[1], 14)
-
-        print("Starting vl53l0...")
-
-        # Start device
-        vl53l0.start()
-
-        distance_sum = 0
-
-        # Read ten samples
-        for _ in range(2):
-            distance = vl53l0.read()
-            print(f"Distance = {distance}mm")  # Check calibration!
-            distance_sum += distance
-            sleep(0.04)
-
-        # Stop device
-        print(f"Distance = {distance}mm")
-        vl53l0.stop()
-
-        threshold = 5000
-        if distance_sum >= threshold:
-            return False
-        else:
-            return True
-
-        # expected = self.test_reel_slot.get(stack_name)
-        # return expected is not None and expected == slot_index
+        occupied_slots = self.test_reel_slots.get(stack_name, set())
+        return slot_index in occupied_slots
 
     # ---------------- pickup ----------------
     def pickup_target_reached(self, stack_name):
@@ -327,7 +236,10 @@ class TaskSensors:
             This is NOT "did we grab it?"
             This is only "have we reached the correct pickup position?"
         """
-        return False
+        # Branch-routing test mode:
+        # immediately report that the target position has been reached,
+        # so the robot does not depend on any real pickup sensor.
+        return True
 
     def close_gripper(self):
         """
@@ -357,7 +269,8 @@ class TaskSensors:
                 1. issue the command here and rely on GRAB_WAIT_MS
                 2. later extend the state machine with more grab substates
         """
-        self.grabber.grab(True)
+        # Branch-routing test mode:
+        # ignore real grabber hardware for now.
         return None
 
     def reel_secured(self):
@@ -386,6 +299,8 @@ class TaskSensors:
             This is very useful and should probably be integrated into grab logic later.
             Right now it is just a placeholder hook.
         """
+        # Branch-routing test mode:
+        # always report success so the mission can continue.
         return True
 
     def measure_reel_resistance(self):
@@ -534,7 +449,10 @@ class TaskSensors:
         IMPORTANT:
             This is only about position for drop-off, not whether the reel was released.
         """
-        return False
+        # Branch-routing test mode:
+        # immediately report that drop position is reached,
+        # so placement does not depend on real sensors.
+        return True
 
     def open_gripper(self):
         """
@@ -559,7 +477,8 @@ class TaskSensors:
             Like close_gripper(), this is an ACTION function.
             The code does not depend on any return value.
         """
-        self.grabber.opn(False)
+        # Branch-routing test mode:
+        # ignore real grabber hardware for now.
         return None
 
     def reel_released(self):
@@ -586,6 +505,8 @@ class TaskSensors:
         IMPORTANT:
             This is another hook that is worth integrating later.
         """
+        # Branch-routing test mode:
+        # always report success so the mission can continue.
         return True
 
     # ---------------- indicator LEDs ----------------

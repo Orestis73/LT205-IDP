@@ -1,6 +1,3 @@
-from collections import deque
-from copy import deepcopy
-
 
 HEAD_N = 0
 HEAD_E = 1
@@ -220,11 +217,11 @@ class navigation:
             2, 3,
             4, 5, 6, 7, 8, 9, 10, 11,
             12, 13,
-            14, 15, 16, 17, 18, 19, 20, 21,
-            20, 19, 18, 17, 16, 15, 14,
+            14, 15, 16, 17, 18, 19, 20,
+            19, 18, 17, 16, 15, 14,
             13,
-            22, 23, 24, 25, 26, 27, 28, 29,
-            28, 27, 26, 25, 24, 23, 22,
+            22, 23, 24, 25, 26, 27, 28,
+            27, 26, 25, 24, 23, 22,
             13, 12,
             30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
             1,
@@ -329,6 +326,20 @@ class navigation:
     # ------------------------------------------------------------------
     # Basic bookkeeping
     # ------------------------------------------------------------------
+    def _clone_steps(self, steps):
+        cloned = []
+
+        for step in steps:
+            new_step = {}
+            for k, v in step.items():
+                if k == "scan" and v is not None:
+                    new_step[k] = dict(v)
+                else:
+                    new_step[k] = v
+            cloned.append(new_step)
+
+        return cloned
+
 
     def total_delivered(self):
         total = 0
@@ -400,11 +411,14 @@ class navigation:
         raise ValueError("Non-Manhattan edge: {} -> {}".format(a, b))
 
     def _shortest_path(self, start, goal):
-        q = deque([start])
+        q = [start]
+        q_head = 0
         prev = {start: None}
 
-        while q:
-            n = q.popleft()
+        while q_head < len(q):
+            n = q[q_head]
+            q_head += 1
+
             if n == goal:
                 break
 
@@ -439,11 +453,15 @@ class navigation:
         if start_state == goal_state:
             return [start_node]
 
-        q = deque([start_state])
+        q = [start_state]
+        q_head = 0
         prev = {start_state: None}
 
-        while q:
-            node, heading = q.popleft()
+        found = False
+
+        while q_head < len(q):
+            node, heading = q[q_head]
+            q_head += 1
 
             for nxt in self.graph[node]:
                 new_heading = self._heading_between(node, nxt)
@@ -451,15 +469,23 @@ class navigation:
 
                 if nxt_state not in prev:
                     prev[nxt_state] = (node, heading)
+
                     if nxt_state == goal_state:
-                        q.clear()
+                        found = True
                         break
+
                     q.append(nxt_state)
+
+            if found:
+                break
 
         if goal_state not in prev:
             raise ValueError(
                 "No pose-path from ({}, {}) to ({}, {})".format(
-                    start_node, heading_name(start_heading), goal_node, heading_name(goal_heading)
+                    start_node,
+                    heading_name(start_heading),
+                    goal_node,
+                    heading_name(goal_heading),
                 )
             )
 
@@ -474,10 +500,10 @@ class navigation:
 
     def _default_180_dir(self, node, heading_in, heading_out):
         # Required special cases
-        if node == 21:
-            return -1
-        if node == 29:
+        if node == 20:
             return +1
+        if node == 28:
+            return -1
         return +1
 
     def _build_mission_from_node_path(self, node_path, start_heading, scan_enabled=False):
@@ -520,13 +546,13 @@ class navigation:
         }
 
     def _mission_suffix_from_scan_step_index(self, start_step_idx):
-        steps = deepcopy(self.scan_template["steps"][start_step_idx:])
+        steps = self._clone_steps(self.scan_template["steps"][start_step_idx:])
         return {
             "steps": steps,
             "end_node": self.scan_template["end_node"],
             "end_heading": self.scan_template["end_heading"],
         }
-
+    
     def _concat_missions(self, first, second):
         if len(first["steps"]) == 0:
             return second
