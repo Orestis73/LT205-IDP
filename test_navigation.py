@@ -30,8 +30,32 @@ def describe_step(step, next_node=None):
     return base
 
 
+def print_steps(title, mission, stop_at_index=None):
+    print(title)
+    print(f"Number of planner steps: {len(mission['steps'])}")
+    print(f"End node: {mission['end_node']}")
+    print(f"End heading: {heading_name(mission['end_heading'])}")
+    print()
+
+    steps = mission["steps"]
+    last_i = len(steps) - 1 if stop_at_index is None else stop_at_index
+
+    for i, step in enumerate(steps[: last_i + 1]):
+        is_last_printed = (i == last_i)
+
+        if is_last_printed and stop_at_index is not None:
+            text = describe_step(step, next_node=None)
+            text += " Detection occurs here at this node."
+        else:
+            next_node = steps[i + 1]["node"] if i + 1 < len(steps) else mission["end_node"]
+            text = describe_step(step, next_node=next_node)
+
+        print(f"  {i:02d}. {text}")
+    print()
+
+
 def print_scan_summary(nav):
-    mission = nav.build_scan_loop_mission()
+    mission = nav.scan_template
     scans = [step for step in mission["steps"] if "scan" in step]
 
     print("=" * 90)
@@ -55,12 +79,8 @@ def print_scan_summary(nav):
         print(f"  {i:02d}. {describe_step(step)}")
     print()
 
-    print("Geometry spot-checks:")
     pu3 = next(s for s in scans if s["scan"]["stack"] == "pu" and s["scan"]["slot"] == 3)
     ou3 = next(s for s in scans if s["scan"]["stack"] == "ou" and s["scan"]["slot"] == 3)
-    print(" ", describe_step(pu3))
-    print(" ", describe_step(ou3))
-    print()
 
     assert len(scans) == 24
     assert counts == {"pd": 6, "pu": 6, "ou": 6, "od": 6}
@@ -71,138 +91,207 @@ def print_scan_summary(nav):
     print()
 
 
-def find_scan_step(mission, stack_name, slot_index):
-    for i, step in enumerate(mission["steps"]):
+def find_first_reel_detection_in_mission(nav, mission, reel_map):
+    """
+    Walk the mission until the first scan step that corresponds to a real reel.
+
+    Returns:
+        {
+            "detection_index": int,
+            "detection_step": step,
+            "colour": str,
+            "empties_before_detection": [(stack, slot), ...]
+        }
+    """
+    empties = []
+
+    for idx, step in enumerate(mission["steps"]):
         scan = step.get("scan")
-        if scan and scan["stack"] == stack_name and scan["slot"] == slot_index:
-            return i, step
-    return None, None
+        if scan is None:
+            continue
+
+        key = (scan["stack"], scan["slot"])
+
+        if nav.slot_checked(scan["stack"], scan["slot"]):
+            continue
+
+        if key in reel_map:
+            return {
+                "detection_index": idx,
+                "detection_step": step,
+                "colour": reel_map[key],
+                "empties_before_detection": empties,
+            }
+
+        empties.append(key)
+
+    return None
 
 
-def print_delivery_mission(mission):
-    print(f"Delivery mission has {len(mission['steps'])} planner steps.")
-    print(f"It ends at node {mission['end_node']} facing {heading_name(mission['end_heading'])}.")
-    print()
-
-    steps = mission["steps"]
-    for i, step in enumerate(steps):
-        next_node = steps[i + 1]["node"] if i + 1 < len(steps) else mission["end_node"]
-        print(f"  {i:02d}. {describe_step(step, next_node=next_node)}")
-    print()
-
-
-def print_return_mission(mission):
-    print(f"Return-home mission has {len(mission['steps'])} planner steps.")
-    print(f"It ends at node {mission['end_node']} facing {heading_name(mission['end_heading'])}.")
-    print()
-
-    steps = mission["steps"]
-    for i, step in enumerate(steps):
-        next_node = steps[i + 1]["node"] if i + 1 < len(steps) else mission["end_node"]
-        print(f"  {i:02d}. {describe_step(step, next_node=next_node)}")
-    print()
-
-
-def simulate_cycle(nav, stack_name, slot_index, colour):
-    print("#" * 90)
-    print(f"SIMULATED CASE: stack={stack_name}, slot={slot_index}, identified colour={colour}")
-    print("#" * 90)
-    print()
-
-    scan_mission = nav.build_scan_loop_mission()
-    idx, scan_step = find_scan_step(scan_mission, stack_name, slot_index)
-    if scan_step is None:
-        raise RuntimeError(f"Could not find scan step for {stack_name} slot {slot_index}")
-
-    print("1) SCAN DETECTION")
-    print(f"   During the perimeter scan, this reel would be detected at scan step index {idx}.")
-    print(f"   {describe_step(scan_step)}")
-    print()
-
-    print("2) POST-GRAB POSE")
-    nav.register_reel_found(
-        stack_name,
-        slot_index,
-        scan_step["scan"]["turn"],
-        scan_step["node"],
-        scan_step["heading_out"],
-    )
-    print(
-        f"   After the local grab macro finishes, the planner assumes the robot is back at "
-        f"node {nav.rejoin_node}, facing {heading_name(nav.rejoin_heading)}."
-    )
-    print(
-        "   This is the key post-grab pose used to start the delivery mission."
-    )
-    print()
-
-    print("3) DELIVERY TO BAY-APPROACH POINT")
-    delivery_mission = nav.build_delivery_mission(colour)
-    target_approach = nav.delivery_targets[colour]["approach"]
-    print(
-        f"   Because the reel colour is {colour}, the global planner must route to "
-        f"approach node {target_approach}."
-    )
-    print_delivery_mission(delivery_mission)
-
-    print("4) BAY HANDOVER")
-    print(
-        f"   Global navigation stops at {nav.place_approach_node}."
-    )
-    print(
-        "   Only at that point does the local place/drop-off macro take over."
-    )
-    print()
-
-    print("5) POST-PLACE POSE")
-    nav.set_post_place_pose_from_current_colour()
-    print(
-        f"   After local place logic finishes, the planner assumes the robot is back at "
-        f"{nav.post_place_node}, facing {heading_name(nav.post_place_heading)}."
-    )
-    print()
-
-    print("6) RETURN-HOME MISSION")
-    return_mission = nav.build_return_home_mission()
-    print(
-        "   Starting from the post-place pose above, the planner computes the route back home."
-    )
-    print_return_mission(return_mission)
-
-    print("7) CYCLE CLEANUP")
-    nav.complete_delivery_cycle()
-    print(
-        f"   Stack {stack_name} is now marked resolved = {nav.stack_info[stack_name]['resolved']}."
-    )
-    print(
-        f"   Planner mode reset to '{nav.mode}', active_stack reset to {nav.active_stack}."
-    )
-    print()
+def print_slot_list(label, slot_list):
+    print(label)
+    if not slot_list:
+        print("  None")
+    else:
+        for stack_name, slot_index in slot_list:
+            print(f"  {stack_name} slot {slot_index}")
     print()
 
 
-def main():
-    nav = navigation()
-
-    print_scan_summary(nav)
-
-    simulate_cycle(nav, "pd", 3, "yellow")
-    simulate_cycle(nav, "pu", 3, "green")
-    simulate_cycle(nav, "ou", 3, "red")
-    simulate_cycle(nav, "od", 3, "blue")
-
-    print("=" * 90)
-    print("FINAL STACK STATUS")
-    print("=" * 90)
+def print_stack_status(nav):
     for stack_name in nav.scan_order:
         info = nav.stack_info[stack_name]
         print(
-            f"{stack_name}: found_slot={info['found_slot']}, colour={info['colour']}, "
-            f"resolved={info['resolved']}"
+            f"{stack_name}: "
+            f"checked={sorted(info['checked_slots'])}, "
+            f"detected={sorted(info['detected_slots'])}, "
+            f"delivered={sorted(info['delivered_slots'])}, "
+            f"colours_by_slot={info['colours_by_slot']}"
         )
+
+
+def main():
+    nav = navigation(expected_total_reels=4)
+
+    # Simulated real reels in the arena
+    reel_map = {
+        ("pd", 2): "yellow",
+        ("pd", 5): "green",
+        ("ou", 2): "red",
+        ("ou", 5): "blue",
+    }
+
+    print_scan_summary(nav)
+
+    print("=" * 90)
+    print("FULL CAMPAIGN SIMULATION")
+    print("=" * 90)
+    print("This simulation now uses the corrected mission policy:")
+    print("  - do NOT return to node 1 after every delivery")
+    print("  - do NOT restart scanning from node 1 after every delivery")
+    print("  - resume scanning from the true post-place pose")
+    print("  - return to node 1 only once, after all 4 reels are delivered")
     print()
-    print(f"All resolved = {nav.all_resolved()}")
 
+    campaign_phase = 1
+    current_scan_mission = nav.build_initial_scan_mission()
 
-if __name__ == "__main__":
-    main()
+    while True:
+        print("#" * 90)
+        print(f"SCAN / DETECTION PHASE {campaign_phase}")
+        print("#" * 90)
+        print()
+
+        detection = find_first_reel_detection_in_mission(nav, current_scan_mission, reel_map)
+        if detection is None:
+            raise RuntimeError(
+                "No future reel was found in the current scan mission. "
+                "That means the simulated reel_map and scan policy are inconsistent."
+            )
+
+        detect_idx = detection["detection_index"]
+        detect_step = detection["detection_step"]
+        colour = detection["colour"]
+        empties = detection["empties_before_detection"]
+
+        print("1) SCAN ROUTE UNTIL THE NEXT REAL DETECTION")
+        print_steps(
+            "Scan mission prefix up to the next detection:",
+            current_scan_mission,
+            stop_at_index=detect_idx,
+        )
+
+        print_slot_list("2) Empty scan slots passed before this detection:", empties)
+
+        # Mark empty scanned slots as checked
+        for stack_name, slot_index in empties:
+            nav.mark_slot_checked(stack_name, slot_index)
+
+        scan = detect_step["scan"]
+        print("3) DETECTED REEL")
+        print(
+            f"Detected reel at stack={scan['stack']}, slot={scan['slot']}, "
+            f"colour={colour}."
+        )
+        print(describe_step(detect_step))
+        print()
+
+        print("4) POST-GRAB POSE")
+        nav.register_reel_found(
+            scan["stack"],
+            scan["slot"],
+            scan["turn"],
+            detect_step["node"],
+            detect_step["heading_out"],
+        )
+        print(
+            f"After local grab, planner assumes robot is back at node {nav.rejoin_node}, "
+            f"facing {heading_name(nav.rejoin_heading)}."
+        )
+        print()
+
+        print("5) DELIVERY TO BAY-APPROACH POINT")
+        delivery_mission = nav.build_delivery_mission(colour)
+        print(
+            f"Because the reel is {colour}, global navigation routes to "
+            f"{nav.delivery_targets[colour]['approach']}."
+        )
+        print_steps("Delivery mission:", delivery_mission)
+        print("6) BAY HANDOVER")
+        print(f"Global navigation hands over at {nav.place_approach_node}.")
+        print("Only there does the local place/drop-off macro begin.")
+        print()
+
+        print("7) POST-PLACE POSE")
+        nav.set_post_place_pose_from_current_colour()
+        print(
+            f"After local place logic, planner assumes robot is back at "
+            f"{nav.post_place_node}, facing {heading_name(nav.post_place_heading)}."
+        )
+        print()
+
+        projected_total = nav.total_delivered() + 1
+
+        if projected_total >= nav.expected_total_reels:
+            print("8) FINAL DELIVERY REACHED")
+            print(
+                f"This is delivery {projected_total} / {nav.expected_total_reels}, "
+                "so planner should now return home exactly once."
+            )
+            print()
+
+            final_return_home = nav.build_return_home_mission()
+            nav.complete_delivery_cycle()
+
+            print("9) FINAL RETURN-HOME MISSION")
+            print_steps("Return-home mission:", final_return_home)
+
+            print("10) FINAL PLANNER STATE")
+            print_stack_status(nav)
+            print()
+            print(f"Total delivered = {nav.total_delivered()} / {nav.expected_total_reels} required reels")
+            print(f"Reels remaining to find = {nav.reels_remaining_to_find()}")
+            print(f"All resolved = {nav.all_resolved()}")
+            break
+
+        print("8) RESUME SCAN INSTEAD OF RETURNING HOME")
+        print(
+            f"This is only delivery {projected_total} / {nav.expected_total_reels}, "
+            "so planner must resume scanning, not go home."
+        )
+        resume_scan_mission = nav.build_resume_scan_mission()
+        nav.complete_delivery_cycle()
+
+        print_steps("Resume-scan mission:", resume_scan_mission)
+
+        print("9) PLANNER STATE AFTER THIS DELIVERY")
+        print_stack_status(nav)
+        print()
+        print(f"Total delivered so far = {nav.total_delivered()} / {nav.expected_total_reels}")
+        print(f"Reels remaining to find = {nav.reels_remaining_to_find()}")
+        print()
+
+        current_scan_mission = resume_scan_mission
+        campaign_phase += 1
+
+main()

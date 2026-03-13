@@ -15,7 +15,7 @@ from control.movement_v3 import (
 )
 from control.pd import middle_error_white_line, pd_follow
 from state_machine_3 import navigation
-from task_sensors import TaskSensors
+from hw.task_sensors import TaskSensors
 
 
 DEBUG = True
@@ -51,8 +51,8 @@ def _reset_after_macro(mem):
 
 
 def _build_initial_mission(nav):
-    mission = nav.build_scan_loop_mission()
-    dbg("INITIAL MISSION BUILT")
+    mission = nav.build_initial_scan_mission()
+    dbg("INITIAL SCAN CAMPAIGN BUILT")
     return mission
 
 
@@ -116,7 +116,7 @@ def main():
 
     mem = Mem()
     states = State()
-    nav = navigation()
+    nav = navigation(expected_total_reels=4)
     task_sensors = TaskSensors()
 
     t_last = ticks_ms()
@@ -147,6 +147,7 @@ def main():
                 "step=", mem.step,
                 "mode=", nav.mode,
                 "stack=", nav.active_stack,
+                "slot=", nav.active_slot,
                 "sumw=", sumw,
                 "black=", b4(black),
                 "white=", b4(white),
@@ -157,6 +158,8 @@ def main():
                 "err=", err,
                 "armed=", mem.events_armed,
                 "rearm=", mem.good_rearm,
+                "delivered=", nav.total_delivered(),
+                "remaining=", nav.reels_remaining_to_find(),
             )
             last_dbg_t = t_now
 
@@ -173,13 +176,17 @@ def main():
             if step is None:
                 dbg("MISSION EXHAUSTED", "mode=", nav.mode)
 
-                if nav.mode == "scan":
+                if nav.mode in ("scan", "resume_scan"):
                     if nav.all_resolved():
-                        set_state(mem, states.STOP, "all reels delivered")
-                    else:
-                        mission = nav.build_scan_loop_mission()
+                        mission = nav.build_return_home_mission()
                         mem.step = 0
                         _reset_after_macro(mem)
+                    else:
+                        set_state(
+                            mem,
+                            states.STOP,
+                            "scan campaign exhausted before all expected reels were delivered",
+                        )
                     continue
 
                 if nav.mode == "to_place_approach":
@@ -191,13 +198,7 @@ def main():
                     continue
 
                 if nav.mode == "return_home":
-                    nav.complete_delivery_cycle()
-                    if nav.all_resolved():
-                        set_state(mem, states.STOP, "all reels delivered; back at node 1")
-                    else:
-                        mission = nav.build_scan_loop_mission()
-                        mem.step = 0
-                        _reset_after_macro(mem)
+                    set_state(mem, states.STOP, "all reels delivered; back at node 1")
                     continue
 
                 set_state(mem, states.STOP, "unknown nav mode {}".format(nav.mode))
@@ -234,7 +235,11 @@ def main():
                         continue
 
                     scan = step.get("scan")
-                    if nav.mode == "scan" and scan is not None and nav.stack_needs_scan(scan["stack"]):
+                    if (
+                        nav.mode in ("scan", "resume_scan")
+                        and scan is not None
+                        and nav.slot_needs_scan(scan["stack"], scan["slot"])
+                    ):
                         has_reel = task_sensors.branch_has_reel(
                             scan["stack"],
                             scan["slot"],
@@ -254,6 +259,8 @@ def main():
                             mem.dir_turn = scan["turn"]
                             set_state(mem, states.GRAB, "reel detected -> grab")
                             continue
+                        else:
+                            nav.mark_slot_checked(scan["stack"], scan["slot"])
 
                     act = step["move"]
                     dbg(
@@ -313,9 +320,23 @@ def main():
             colour = nav.current_colour
             place_cfg = nav.place_cfg[colour]
             place_movement(mem, motors, sensors, states, task_sensors, colour, place_cfg)
+
             if mem.state == states.FOLLOW:
                 nav.set_post_place_pose_from_current_colour()
-                mission = nav.build_return_home_mission()
+
+                projected_total = nav.total_delivered() + 1
+
+                if projected_total >= nav.expected_total_reels:
+                    mission = nav.build_return_home_mission()
+                    next_mode = "return_home"
+                else:
+                    mission = nav.build_resume_scan_mission()
+                    next_mode = "resume_scan"
+
+                nav.complete_delivery_cycle()
+                nav.mode = next_mode
+                nav.current_mission = mission
+
                 mem.step = 0
                 _reset_after_macro(mem)
             continue
